@@ -5,6 +5,8 @@ from os.path import join
 from PIL import Image
 
 class Helper:
+    interpolation = Image.BICUBIC
+
     @staticmethod
     def is_image_file(filename):
         return any(filename.endswith(extension) for extension in ['.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG'])
@@ -24,7 +26,7 @@ class Helper:
     def train_lr_transform(crop_size, upscale_factor):
         return Compose([
             ToPILImage(),
-            Resize(crop_size // upscale_factor, interpolation=Image.BICUBIC),
+            Resize(crop_size // upscale_factor, interpolation=Helper.interpolation),
             ToTensor()
         ])
 
@@ -38,8 +40,9 @@ class Helper:
         ])
 
 class TrainDatasetFromFolder(Dataset):
-    def __init__(self, dataset_dir, crop_size, upscale_factor):
+    def __init__(self, dataset_dir, crop_size, upscale_factor, inter=Image.BICUBIC):
         super(TrainDatasetFromFolder, self).__init__()
+        Helper.interpolation = inter
         self.image_filenames = [join(dataset_dir, x) for x in listdir(dataset_dir) if Helper.is_image_file(x)]
         crop_size = Helper.calculate_valid_crop_size(crop_size, upscale_factor)
         self.hr_transform = Helper.train_hr_transform(crop_size)
