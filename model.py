@@ -3,229 +3,147 @@ from torch import nn
 from torch.nn import functional as F
 import torchvision
 import math
+from torchvision.models.vgg import vgg16
 
 
+class ResidualBlock(nn.Module):
+  def __init__(self, channels):
+    super(ResidualBlock, self).__init__()
+    self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+    self.bn1 = nn.BatchNorm2d(channels)
+    self.prelu = nn.PReLU()
+    self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+    self.bn2 = nn.BatchNorm2d(channels)
+  def forward(self, x):
+    residual = self.conv1(x)
+    residual = self.bn1(residual)
+    residual = self.prelu(residual)
+    residual = self.conv2(residual)
+    residual = self.bn2(residual)
+    return x + residual
 
-class Convolution(nn.Module):
-
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, batch_norm=False, activation=None):
-        super(Convolution, self).__init__()
-
-        assert activation in {'prelu', 'leakyrelu', 'tanh', None}, 'Activation function not supported' if activation is not None else True
-
-        # A container that will hold the layers in this convolutional block
-        layers = list()
-
-        # A convolutional layer
-        layers.append(
-            nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=stride,
-                      padding=kernel_size // 2))
-
-        # A batch normalization (BN) layer, if wanted
-        if batch_norm is True:
-            layers.append(nn.BatchNorm2d(num_features=out_channels))
-
-        activations = {
-            'prelu': nn.PReLU(),
-            'leakyrelu': nn.LeakyReLU(),
-            'tanh': nn.Tanh()
-        }
-
-        layers.append(activations[activation] if activation is not None else nn.Identity())
-
-        # Put together the convolutional block as a sequence of the layers in this container
-        self.conv_block = nn.Sequential(*layers)
-
-    def forward(self, input):
-        output = self.conv_block(input)  # (N, out_channels, w, h)
-
-        return output
-
-
-class SubPixelConvolutional(nn.Module):
-
-    def __init__(self, kernel_size=3, n_channels=64, scaling_factor=2):
-        super(SubPixelConvolutional, self).__init__()
-
-        # A convolutional layer that increases the number of channels by scaling factor^2, followed by pixel shuffle and PReLU
-        self.conv = nn.Conv2d(in_channels=n_channels, out_channels=n_channels * (scaling_factor ** 2),
-                              kernel_size=kernel_size, padding=kernel_size // 2)
-        # These additional channels are shuffled to form additional pixels, upscaling each dimension by the scaling factor
-        self.pixel_shuffle = nn.PixelShuffle(upscale_factor=scaling_factor)
-        self.prelu = nn.PReLU()
-
-    def forward(self, input):
-        output = self.conv(input)  # (N, n_channels * scaling factor^2, w, h)
-        output = self.pixel_shuffle(output)  # (N, n_channels, w * scaling factor, h * scaling factor)
-        output = self.prelu(output)  # (N, n_channels, w * scaling factor, h * scaling factor)
-
-        return output
-
-
-class Residual(nn.Module):
-
-    def __init__(self, kernel_size=3, n_channels=64):
-        super(Residual, self).__init__()
-
-        # The first convolutional block
-        self.conv_block1 = Convolution(in_channels=n_channels, out_channels=n_channels, kernel_size=kernel_size,
-                                              batch_norm=True, activation='PReLu')
-
-        # The second convolutional block
-        self.conv_block2 = Convolution(in_channels=n_channels, out_channels=n_channels, kernel_size=kernel_size,
-                                              batch_norm=True, activation=None)
-
-    def forward(self, input_):
-        residual = input_  # (N, n_channels, w, h)
-        output = self.conv_block1(input_)  # (N, n_channels, w, h)
-        output = self.conv_block2(output)  # (N, n_channels, w, h)
-        output = output + residual  # (N, n_channels, w, h)
-
-        return output
-
-
-class SRResNet(nn.Module):
-
-    def __init__(self, large_kernel_size=9, small_kernel_size=3, n_channels=64, n_blocks=16, scaling_factor=4):
-        super(SRResNet, self).__init__()
-
-        # Scaling factor must be 2, 4, or 8
-        scaling_factor = int(scaling_factor)
-        assert scaling_factor in {2, 4, 8}, "The scaling factor must be 2, 4, or 8!"
-
-        # The first convolutional block
-        self.conv_block1 = Convolution(in_channels=3, out_channels=n_channels, kernel_size=large_kernel_size,
-                                              batch_norm=False, activation='PReLu')
-
-        # A sequence of n_blocks residual blocks, each containing a skip-connection across the block
-        self.residual_blocks = nn.Sequential(
-            *[Residual(kernel_size=small_kernel_size, n_channels=n_channels) for i in range(n_blocks)])
-
-        # Another convolutional block
-        self.conv_block2 = Convolution(in_channels=n_channels, out_channels=n_channels,
-                                              kernel_size=small_kernel_size,
-                                              batch_norm=True, activation=None)
-
-        # Upscaling is done by sub-pixel convolution, with each such block upscaling by a factor of 2
-        n_subpixel_convolution_blocks = int(math.log2(scaling_factor))
-        self.subpixel_convolutional_blocks = nn.Sequential(
-            *[SubPixelConvolutional(kernel_size=small_kernel_size, n_channels=n_channels, scaling_factor=2) for i
-              in range(n_subpixel_convolution_blocks)])
-
-        # The last convolutional block
-        self.conv_block3 = Convolution(in_channels=n_channels, out_channels=3, kernel_size=large_kernel_size,
-                                              batch_norm=False, activation='Tanh')
-
-    def forward(self, lr_imgs):
-        output = self.conv_block1(lr_imgs)  # (N, 3, w, h)
-        residual = output  # (N, n_channels, w, h)
-        output = self.residual_blocks(output)  # (N, n_channels, w, h)
-        output = self.conv_block2(output)  # (N, n_channels, w, h)
-        output = output + residual  # (N, n_channels, w, h)
-        output = self.subpixel_convolutional_blocks(output)  # (N, n_channels, w * scaling factor, h * scaling factor)
-        sr_imgs = self.conv_block3(output)  # (N, 3, w * scaling factor, h * scaling factor)
-
-        return sr_imgs
-
+class UpsampleBlock(nn.Module):
+  def __init__(self, in_channels, up_scale):
+    super(UpsampleBlock, self).__init__()
+    self.conv = nn.Conv2d(in_channels, in_channels * up_scale ** 2, 
+                          kernel_size=3, padding=1)
+    self.pixel_shuffle = nn.PixelShuffle(up_scale)
+    self.prelu = nn.PReLU()
+  def forward(self, x):
+    x = self.conv(x)
+    x = self.pixel_shuffle(x)
+    x = self.prelu(x)
+    return x
 
 class Generator(nn.Module):
+  def __init__(self, scale_factor):
+    super(Generator, self).__init__()
+    upsample_block_num = int(math.log(scale_factor, 2))
 
-    def __init__(self, large_kernel_size=9, small_kernel_size=3, n_channels=64, n_blocks=16, scaling_factor=4):
-        super(Generator, self).__init__()
+    self.block1 = nn.Sequential(
+        nn.Conv2d(3, 64, kernel_size=9, padding=4),
+        nn.PReLU()
+    )
 
-        # The generator is simply an SRResNet, as above
-        self.net = SRResNet(large_kernel_size=large_kernel_size, small_kernel_size=small_kernel_size,
-                            n_channels=n_channels, n_blocks=n_blocks, scaling_factor=scaling_factor)
-
-    def initialize_with_srresnet(self, srresnet_checkpoint):
-        srresnet = torch.load(srresnet_checkpoint)['model']
-        self.net.load_state_dict(srresnet.state_dict())
-
-        print("\nLoaded weights from pre-trained SRResNet.\n")
-
-    def forward(self, lr_imgs):
-        sr_imgs = self.net(lr_imgs)  # (N, n_channels, w * scaling factor, h * scaling factor)
-
-        return sr_imgs
-
+    self.block2 = ResidualBlock(64)
+    self.block3 = ResidualBlock(64)
+    self.block4 = ResidualBlock(64)
+    self.block5 = ResidualBlock(64)
+    self.block6 = ResidualBlock(64)
+    self.block7 = nn.Sequential(
+        nn.Conv2d(64, 64, kernel_size=3, padding=1),
+        nn.BatchNorm2d(64)
+    )
+    block8 = [UpsampleBlock(64, 2) for _ in range(upsample_block_num)]
+    block8.append(nn.Conv2d(64, 3, kernel_size=9, padding=4))
+    self.block8 = nn.Sequential(*block8)
+  def forward(self, x):
+    block1 = self.block1(x)
+    block2 = self.block2(block1)
+    block3 = self.block3(block2)
+    block4 = self.block4(block3)
+    block5 = self.block5(block4)
+    block6 = self.block6(block5)
+    block7 = self.block7(block6)
+    block8 = self.block8(block1 + block7)
+    return (torch.tanh(block8) + 1) / 2
 
 class Discriminator(nn.Module):
+  def __init__(self):
+    super(Discriminator, self).__init__()
+    self.net = nn.Sequential(
+        nn.Conv2d(3, 64, kernel_size=3, padding=1),
+        nn.LeakyReLU(0.2),
 
-    def __init__(self, kernel_size=3, n_channels=64, n_blocks=8, fc_size=1024):
-        super(Discriminator, self).__init__()
+        nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
+        nn.BatchNorm2d(64),
+        nn.LeakyReLU(0.2),
 
-        in_channels = 3
+        nn.Conv2d(64, 128, kernel_size=3, padding=1),
+        nn.BatchNorm2d(128),
+        nn.LeakyReLU(0.2),
 
-        # A series of convolutional blocks
-        # The first, third, fifth (and so on) convolutional blocks increase the number of channels but retain image size
-        # The second, fourth, sixth (and so on) convolutional blocks retain the same number of channels but halve image size
-        # The first convolutional block is unique because it does not employ batch normalization
-        conv_blocks = list()
-        for i in range(n_blocks):
-            out_channels = (n_channels if i is 0 else in_channels * 2) if i % 2 is 0 else in_channels
-            conv_blocks.append(
-                Convolution(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                                   stride=1 if i % 2 is 0 else 2, batch_norm=i is not 0, activation='LeakyReLu'))
-            in_channels = out_channels
-        self.conv_blocks = nn.Sequential(*conv_blocks)
+        nn.Conv2d(128, 256, kernel_size=3, padding=1),
+        nn.BatchNorm2d(256),
+        nn.LeakyReLU(0.2),
 
-        # An adaptive pool layer that resizes it to a standard size
-        # For the default input size of 96 and 8 convolutional blocks, this will have no effect
-        self.adaptive_pool = nn.AdaptiveAvgPool2d((6, 6))
+        nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
+        nn.BatchNorm2d(256),
+        nn.LeakyReLU(0.2),
 
-        self.fc1 = nn.Linear(out_channels * 6 * 6, fc_size)
+        nn.Conv2d(256, 512, kernel_size=3, padding=1),
+        nn.BatchNorm2d(512),
+        nn.LeakyReLU(0.2),
 
-        self.leaky_relu = nn.LeakyReLU(0.2)
+        nn.Conv2d(512, 512, kernel_size=3, stride=2, padding=1),
+        nn.BatchNorm2d(512),
+        nn.LeakyReLU(0.2),
 
-        self.fc2 = nn.Linear(1024, 1)
-
-        # Don't need a sigmoid layer because the sigmoid operation is performed by PyTorch's nn.BCEWithLogitsLoss()
-
-    def forward(self, imgs):
-        batch_size = imgs.size(0)
-        output = self.conv_blocks(imgs)
-        output = self.adaptive_pool(output)
-        output = self.fc1(output.view(batch_size, -1))
-        output = self.leaky_relu(output)
-        logit = self.fc2(output)
-
-        return logit
+        nn.AdaptiveAvgPool2d(1),
+        nn.Conv2d(512, 1024, kernel_size=1),
+        nn.LeakyReLU(0.2),
+        nn.Conv2d(1024, 1, kernel_size=1)
+    )
+  def forward(self, x):
+    batch_size=x.size()[0]
+    return torch.sigmoid(self.net(x).view(batch_size))
 
 
-class TruncatedVGG19(nn.Module):
+# Now we got to make the Generator Loss
+class TVLoss(nn.Module):
+  def __init__(self, tv_loss_weight=1):
+    super(TVLoss, self).__init__()
+    self.tv_loss_weight=tv_loss_weight
+  def forward(self, x):
+    batch_size=x.size()[0]
+    h_x = x.size()[2]
+    w_x = x.size()[3]
 
-    def __init__(self, i, j):
-        super(TruncatedVGG19, self).__init__()
+    count_h = self.tensor_size(x[:, :, 1:, :])
+    count_w = self.tensor_size(x[:, :, :, 1:])
 
-        # Load the pre-trained VGG19 available in torchvision
-        vgg19 = torchvision.models.vgg19(pretrained=True)
+    h_tv = torch.pow(x[:, :, 1:, :] - x[:, :, :h_x - 1, :], 2).sum()
+    w_tv = torch.pow(x[:, :, :, 1:] - x[:, :, :, :w_x - 1], 2).sum()
+    return self.tv_loss_weight * 2 * (h_tv / count_h + w_tv / count_w) / batch_size
+  
+  # Forgot to implement an important method
+  @staticmethod # Must add this
+  def tensor_size(t):
+    return t.size()[1] * t.size()[2] * t.size()[3]
 
-        maxpool_counter = 0
-        conv_counter = 0
-        truncate_at = 0
-        # Iterate through the convolutional section ("features") of the VGG19
-        for layer in vgg19.features.children():
-            truncate_at += 1
-
-            # Count the number of maxpool layers and the convolutional layers after each maxpool
-            if isinstance(layer, nn.Conv2d):
-                conv_counter += 1
-            if isinstance(layer, nn.MaxPool2d):
-                maxpool_counter += 1
-                conv_counter = 0
-
-            # Break if we reach the jth convolution after the (i - 1)th maxpool
-            if maxpool_counter == i - 1 and conv_counter == j:
-                break
-
-        # Check if conditions were satisfied
-        assert maxpool_counter == i - 1 and conv_counter == j, "One or both of i=%d and j=%d are not valid choices for the VGG19!" % (
-            i, j)
-
-        # Truncate to the jth convolution (+ activation) before the ith maxpool layer
-        self.truncated_vgg19 = nn.Sequential(*list(vgg19.features.children())[:truncate_at + 1])
-
-    def forward(self, input):
-        output = self.truncated_vgg19(input)  # (N, feature_map_channels, feature_map_w, feature_map_h)
-
-        return output
+class GeneratorLoss(nn.Module):
+  def __init__(self):
+    super(GeneratorLoss, self).__init__()
+    vgg = vgg16(pretrained=True)
+    loss_network = nn.Sequential(*list(vgg.features)[:31]).eval()
+    for param in loss_network.parameters():
+      param.requires_grad = False
+    self.loss_network = loss_network
+    self.mse_loss = nn.MSELoss()
+    self.tv_loss = TVLoss()
+  def forward(self, out_labels, out_images, target_images):
+    adversial_loss = torch.mean(1 - out_labels)
+    perception_loss = self.mse_loss(out_images, target_images)
+    image_loss = self.mse_loss(out_images, target_images)
+    tv_loss = self.tv_loss(out_images)
+    return image_loss + 0.001 * adversial_loss + 0.006 * perception_loss + 2e-8 * tv_loss
