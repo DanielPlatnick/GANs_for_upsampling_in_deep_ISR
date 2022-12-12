@@ -118,17 +118,41 @@ UPSCALE_FACTOR = 16
 netG_nn = Generator(UPSCALE_FACTOR)
 netG_nn = netG_nn.to(device)
 
-netG_nn.load_state_dict(torch.load("models/NN_16_128_30.pth", map_location=device))
+netG_nn.load_state_dict(torch.load("good_models/linear_16_128_30.pth", map_location=device))
 netG_nn.eval()
 
-
+img_path = "data/original/train/image_4.jpg"
+# img_path = "data/original/train/image_9.jpg"
 #%%
-img = Image.open("data/original/train/image_0.jpg")
+img = Image.open(img_path)
+original_image = Image.open(img_path)
+print(original_image.size)
+
+img = img.crop((0, 0, 1072, 480))
+print(img.size)
+# 1072, 480
+
+target = img
+
 # resize the image to 96x96
-img = img.resize((350, 350), Image.NEAREST)
+plt.imshow(img)
+# plt.title("Original HD")
+# plt.savefig("comparison_figures/fig2_hd")
+plt.show()
+
+#linx, bilinx, boxx, nnx, bicubicx, lanczos, hamming
+
+img = img.resize((67, 30), Image.LINEAR)
+print(img.size)
+plt.imshow(img)
+# plt.title("Box Filter Downsampled")
+# plt.savefig("comparison_figures/fig2_lr_box_8")
+
+plt.show()
 
 # convert to tensor
 img = ToTensor()(img)
+
 
 # add batch dimension
 img = img.unsqueeze(0)
@@ -137,15 +161,31 @@ img = img.to(device)
 
 
 nearest = netG_nn(img)
+nearest = nearest.squeeze(0).detach().cpu().permute(1, 2, 0)
+print(nearest.shape)
 
-# show bicubic hamming and nn
-# plt.figure(figsize=(20, 10))
-# #show low resolution image
-# plt.subplot(1, 2, 1)
-# plt.imshow(img.squeeze(0).detach().cpu().permute(1, 2, 0))
-# plt.subplot(1, 2, 2)
-plt.imshow(nearest.squeeze(0).detach().cpu().permute(1, 2, 0))
-#
-# # save images
-# plt.savefig("predicted/comparison.png")
+predicted = nearest
+
+
+# plt.imshow(nearest)
+# plt.title("Super Resolution 8x Upscaled (Box)")
+# plt.savefig("comparison_figures/fig2_sru_box_8")
+
+
+target = np.array(target)
+plt.imshow(target)
 plt.show()
+print(target.size, type(target))
+
+predicted = predicted.numpy()
+
+
+plt.imshow(predicted)
+plt.show()
+print(predicted.size, type(predicted))
+
+from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import peak_signal_noise_ratio as psnr
+
+print(f"PSNR: {psnr(target, predicted)}, SSIM: {ssim(target, predicted, multichannel=True)}")
+
