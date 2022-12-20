@@ -9,8 +9,7 @@ effectiveness of the downsampling method used in creating a
 low resolution training set. In this research, we compare several
 different downsampling methods in the context of deep image
 super resolution. The explored downsampling methods include
-linear interpolation, bilinear interpolation, nearest neighbor in-
-terpolation, lanczos filter, bicubic interpolation, hamming window
+linear interpolation, bilinear interpolation, nearest neighbor interpolation, lanczos filter, bicubic interpolation, hamming window
 and box filter. We first provide a qualitative comparison of
 each downsampling method used on images with varying upscale
 factors, and then provide an empirical study with quantitative
