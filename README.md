@@ -18,4 +18,4 @@ window, and lanczos filter work best for training super image
 resolution models.
 
 
-[Download the PDF](https://github.com/DanielPlatnick/downsampling_in_deep_ISR/raw/main/DanielPlatnick/downsampling_in_deep_ISR/Downsampling_in_deep_ISR_paper.pdf)
+[Download the PDF](https://github.com/DanielPlatnick/downsampling_in_deep_ISR/DanielPlatnick/downsampling_in_deep_ISR/Downsampling_in_deep_ISR_paper.pdf)
