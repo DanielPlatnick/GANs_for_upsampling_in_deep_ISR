@@ -16,3 +16,6 @@ factors, and then provide an empirical study with quantitative
 results to demonstrate that linear interpolation, the hamming
 window, and lanczos filter work best for training super image
 resolution models.
+
+
+[Download the PDF](https://github.com/DanielPlatnick/downsampling_in_deep_ISR/raw/main/DanielPlatnick/downsampling_in_deep_ISR/Downsampling in deep ISR paper.pdf)
