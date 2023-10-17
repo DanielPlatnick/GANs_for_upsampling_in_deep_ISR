@@ -1,6 +1,6 @@
 # downsampling_in_deep_ISR
-Deep image super resolution is the process of up-
-scaling images with deep neural networks. Downsampling is a
+Deep image super resolution is the process of up-scaling
+images with deep neural networks. Downsampling is a
 critical step in this process, where a high-resolution image is
 converted to a low-resolution version in order to be processed by
 a deep learning model for training. The quality of the resulting
