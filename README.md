@@ -4,9 +4,8 @@ images with deep neural networks. Downsampling is a
 critical step in this process, where a high-resolution image is
 converted to a low-resolution version in order to be processed by
 a deep learning model for training. The quality of the resulting
-super-resolution image depends heavily on the complexity and
-effectiveness of the downsampling method used in creating a
-low resolution training set. In this research, we compare several
+super-resolution image depends heavily on the downsampling method 
+used in creating the training set. In this research, we compare several
 different downsampling methods in the context of deep image
 super resolution. The explored downsampling methods include
 linear interpolation, bilinear interpolation, nearest neighbor interpolation, lanczos filter, bicubic interpolation, hamming window
